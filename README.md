@@ -1,6 +1,28 @@
 # Office Reader
 
-This fork adds a development preview for [external PPTX links in the current pane](docs/external-pptx.md), without copying files or creating symlinks.
+## About this fork
+
+This is the LexWeave development fork of
+[qianwei4712/obsidian-word-reader](https://github.com/qianwei4712/obsidian-word-reader).
+It extends Office Reader for study workflows where Markdown notes live in an
+Obsidian vault synced through iCloud, while large course documents stay in a
+separate local folder. Keeping documents outside the synced vault avoids adding
+those files to its storage and sync workload.
+
+The original reader opens vault files. External `file://` links ordinarily launch
+a system application, interrupting the reading workflow. This fork adds
+[external PPTX preview in the clicked Obsidian pane](docs/external-pptx.md): it
+reads the existing file without importing it into the vault or creating symlinks.
+Existing vault DOCX, PPTX, and XLSX readers are retained.
+
+External PPTX preview has passed automated checks and a real macOS Obsidian test;
+the user also confirmed successful opening. External Word (`.docx`) and Excel
+(`.xlsx`) preview are possible next steps and **are not implemented yet**.
+
+See [fork rationale, implementation, validation, and future plans](FORK.md).
+The fork changes currently live on `feat/external-pptx` and are tracked in
+[draft PR #1](https://github.com/lexweave/obsidian-word-reader/pull/1).
+This is a development build, not an upstream release.
 
 [中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md)
 
