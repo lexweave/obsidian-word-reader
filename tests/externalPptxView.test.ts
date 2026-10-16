@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
+import { EditorView } from "@codemirror/view";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +19,49 @@ async function until(check: () => boolean): Promise<void> {
   }
   assert.ok(check(), "View did not reach the expected state");
 }
+
+void test("Live Preview spans intercept ordinary clicks and early editor mousedown only for PPTX", async () => {
+  const app = new TestApp();
+  const plugin = new WordReaderPlugin(app as unknown as App, {} as PluginManifest);
+  await plugin.onload();
+  const leaf = new TestLeaf(app);
+  const source = dom.document.createElement("div"); source.className = "is-live-preview";
+  const editorEl = dom.document.createElement("div"); editorEl.className = "cm-editor";
+  const link = dom.document.createElement("span"); link.className = "cm-link";
+  const label = dom.document.createElement("span"); label.className = "cm-underline"; label.textContent = "Slides";
+  link.appendChild(label); editorEl.appendChild(link); source.appendChild(editorEl);
+  leaf.view.contentEl.appendChild(source as unknown as Node);
+  const target = source.querySelector(".cm-underline")!;
+  let text = "[Slides](<file:///tmp/slides.pptx>) · [Canvas](https://example.org)";
+  let position = 3;
+  const editor = mock.method(EditorView, "findFromDOM", () => ({
+    posAtDOM: () => position,
+    state: { doc: { lineAt: () => ({ text, from: 0 }) } },
+  }));
+  const open = mock.method(plugin, "openExternalPptx", async () => {});
+  let externalCalls = 0;
+  target.addEventListener("mousedown", () => { externalCalls++; });
+  target.addEventListener("click", () => { externalCalls++; });
+  const dispatch = (type: string) => target.dispatchEvent(new dom.MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+  try {
+    assert.equal(dispatch("mousedown"), false);
+    assert.equal(open.mock.callCount(), 0, "Open only once, on click");
+    assert.equal(dispatch("click"), false);
+    assert.equal(externalCalls, 0, "Stop Obsidian's external opener before it runs");
+    assert.equal(open.mock.callCount(), 1);
+    assert.equal(open.mock.calls[0]?.arguments[0], "file:///tmp/slides.pptx");
+    assert.ok(open.mock.calls[0]?.arguments[1] === leaf as unknown as WorkspaceLeaf);
+    position = text.indexOf("Canvas") + 1;
+    dispatch("mousedown"); dispatch("click");
+    assert.equal(externalCalls, 2, "Leave other links to Obsidian");
+    position = 3; text = "[Slides](<file:///tmp/slides.docx>)";
+    dispatch("mousedown"); dispatch("click");
+    assert.equal(open.mock.callCount(), 1, "Do not intercept other file formats");
+    text = "[Slides](<file:///tmp/slides.pptx>)"; source.className = "";
+    dispatch("mousedown"); dispatch("click");
+    assert.equal(open.mock.callCount(), 1, "Plain source-mode clicks keep editing behavior");
+  } finally { editor.mock.restore(); open.mock.restore(); plugin.unload(); source.remove(); }
+});
 
 void test("actual PPTX views: click routing, permission cancellation, rendering, summaries, replacement and close", async () => {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), "office-reader-view-"));

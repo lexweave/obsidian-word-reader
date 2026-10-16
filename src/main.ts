@@ -72,19 +72,6 @@ export default class WordReaderPlugin extends Plugin {
       this.registerView(EXTERNAL_PPTX_VIEW_TYPE, (leaf) => new ExternalPptxView(leaf, this));
       this.registerExternalPptxLinks(activeDocument);
       this.app.workspace.iterateAllLeaves((leaf) => this.registerExternalPptxLinks(leaf.view.containerEl.doc));
-      this.registerEditorExtension(EditorView.domEventHandlers({ click: (event, view) => {
-        if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return false;
-        const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
-        if (position === null) return false;
-        const line = view.state.doc.lineAt(position);
-        const uri = externalPptxAtPosition(line.text, position - line.from);
-        if (!uri) return false;
-        const leaf = this.externalLinkLeaf(view.dom);
-        if (!leaf) return false;
-        event.preventDefault(); event.stopImmediatePropagation();
-        void this.openExternalPptx(uri, leaf);
-        return true;
-      } }));
       this.registerEvent(this.app.workspace.on("window-open", (_workspace, win) => {
         this.registerExternalPptxLinks(win.document);
       }));
@@ -320,18 +307,44 @@ export default class WordReaderPlugin extends Plugin {
   private registerExternalPptxLinks(doc: Document): void {
     if (this.externalDocuments.has(doc)) return;
     this.externalDocuments.add(doc);
+    // Obsidian Live Preview uses CodeMirror spans, not <a> elements. Capture
+    // mousedown as well: its editor handler can open URLs before click fires.
+    this.registerDomEvent(doc, "mousedown", (event: MouseEvent) => {
+      const target = event.targetNode;
+      if (event.button !== 0 || !target?.instanceOf(Element)) return;
+      if (!this.externalPptxFromEditorEvent(event, target)) return;
+      if (!this.externalLinkLeaf(target)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+    }, true);
     this.registerDomEvent(doc, "click", (event: MouseEvent) => {
       const target = event.targetNode;
       if (event.button !== 0 || !target?.instanceOf(Element)) return;
       const anchor = target.closest("a[href]");
       const href = anchor?.getAttribute("href");
-      const uri = href ? parseExternalPptxLink(href) : null;
+      const uri = href ? parseExternalPptxLink(href) : this.externalPptxFromEditorEvent(event, target);
       if (!uri) return;
-      const sourceLeaf = anchor ? this.externalLinkLeaf(anchor) : null;
+      const sourceLeaf = this.externalLinkLeaf(anchor ?? target);
       if (!sourceLeaf) return;
       event.preventDefault(); event.stopImmediatePropagation();
       void this.openExternalPptx(uri, sourceLeaf);
     }, true);
+  }
+
+  private externalPptxFromEditorEvent(event: MouseEvent, target: Element): string | null {
+    const editor = target.closest(".cm-editor");
+    if (!editor) return null;
+    const renderedLink = target.closest(".cm-link, .cm-url, .external-link");
+    const livePreview = !!target.closest(".is-live-preview");
+    if (!(event.ctrlKey || event.metaKey) && !(livePreview && renderedLink)) return null;
+    try {
+      const view = EditorView.findFromDOM(editor as HTMLElement);
+      if (!view) return null;
+      // DOM positions also work for hidden URL/icon widgets in Live Preview.
+      const position = renderedLink ? view.posAtDOM(target) : view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (position === null) return null;
+      const line = view.state.doc.lineAt(position);
+      return externalPptxAtPosition(line.text, position - line.from);
+    } catch { return null; }
   }
 
   private externalLinkLeaf(element: Element): WorkspaceLeaf | null {

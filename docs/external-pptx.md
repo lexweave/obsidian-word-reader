@@ -100,17 +100,27 @@ resource-residue budgets are unchanged.
    ensure neither its original bytes nor the vault contents were changed by opening.
 7. Check a vault PPTX, DOCX and XLSX to confirm normal file opening remains intact.
 
-The local Obsidian CLI reported an outdated installer and its view-evaluation
-commands stalled. The temporary test-vault registration was removed without
-changing any original registry entries. The personal installed plugin was not
-replaced. Desktop acceptance is therefore pending, not claimed as a passed test.
+On 2026-10-15, the installed development build was tested in the user's actual
+Obsidian 1.14.4 session through the CLI. A normal Live Preview click on Synesthesia
+in the existing Perception navigation note prevented both mousedown and click
+from reaching the system opener. After granting the existing course directory,
+the same leaf became `external-pptx-reader-view` and rendered the real slide text
+and SVG content. The external source was present, with no reader error. The
+previous plugin files were backed up before replacement. This verifies that
+specific desktop path; the remaining acceptance steps above are not all claimed.
+
+This test caught two gaps in the earlier simulated host: Live Preview renders
+links as CodeMirror spans, and Obsidian supplies a `require` argument while its
+`module` object has no `require` method. Regression tests now cover both cases.
+Plain source-mode clicks keep editing behavior; Ctrl/Cmd-click opens the PPTX.
 
 
 ### Local result
 
-The full `npm run check` passed with **130/130 tests**, including the supplied
-`Synesthesia slides.pptx` from the external course directory. Its original bytes
-were unchanged after rendering. Read-only ZIP, performance, 400 lifecycle stress
+The current full `npm run check` passed: **131 passed, 0 failed, 1 skipped**
+(the optional real-file test needs `OFFICE_READER_TEST_PPTX`). The earlier run
+included the supplied `Synesthesia slides.pptx`, whose original bytes were
+unchanged; the actual desktop test above now also verifies that presentation. Read-only ZIP, performance, 400 lifecycle stress
 cycles, dependency inventory, and source/bundle security scans passed. The final
 bundle is approximately 503 KiB within the 512 KiB bound. The upstream lockfile
 also has npm advisory findings (8 reported during setup); the repository's
