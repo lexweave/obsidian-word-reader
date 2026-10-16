@@ -1,5 +1,10 @@
 # External PPTX preview (development build)
 
+The external-source feature now also supports DOCX and XLSX. See the current
+[external Office document guide](external-office.md) for all formats, separate
+permissions, and updated validation coverage. The notes below describe the
+original PPTX implementation and its initial validation.
+
 This fork can open a local `file:///...pptx` link from a Markdown note in the pane
 where it was clicked. It reads the original file in place. It does not import the
 presentation into the vault, create a presentation copy, create a symbolic link,
@@ -117,7 +122,7 @@ Plain source-mode clicks keep editing behavior; Ctrl/Cmd-click opens the PPTX.
 
 ### Local result
 
-The current full `npm run check` passed: **131 passed, 0 failed, 1 skipped**
+The PPTX-stage full `npm run check` passed: **131 passed, 0 failed, 1 skipped**
 (the optional real-file test needs `OFFICE_READER_TEST_PPTX`). The earlier run
 included the supplied `Synesthesia slides.pptx`, whose original bytes were
 unchanged; the actual desktop test above now also verifies that presentation. Read-only ZIP, performance, 400 lifecycle stress

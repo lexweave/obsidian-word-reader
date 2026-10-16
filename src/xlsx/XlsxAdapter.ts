@@ -34,7 +34,10 @@ implements OfficeReaderAdapter<XlsxPackage, XlsxWorksheet> {
   }
 
   async open(app: App, file: TFile): Promise<XlsxPackage> {
-    const buffer = await app.vault.readBinary(file);
+    return this.openBuffer(await app.vault.readBinary(file));
+  }
+
+  async openBuffer(buffer: ArrayBuffer): Promise<XlsxPackage> {
     return XlsxPackage.load(buffer);
   }
 

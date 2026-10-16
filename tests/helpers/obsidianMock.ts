@@ -5,6 +5,8 @@ export const dom = new Window({ url: "http://localhost/" });
 const doc = dom.document;
 Object.assign(globalThis, { window: dom, document: doc, activeWindow: dom, activeDocument: doc,
   HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node,
+  getComputedStyle: (el: Parameters<typeof dom.getComputedStyle>[0]) => dom.getComputedStyle(el), NodeFilter: dom.NodeFilter,
+  Document: dom.Document, XMLSerializer: dom.XMLSerializer,
   MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent, DOMParser: dom.DOMParser,
   HTMLImageElement: dom.HTMLImageElement, HTMLStyleElement: dom.HTMLStyleElement,
   ResizeObserver: class { observe() {} disconnect() {} unobserve() {} },
@@ -38,10 +40,10 @@ export function normalizePath(path: string): string { return path.replace(/\\/g,
 export class Notice { constructor(_message: string) {} }
 export class TFile {
   stat = { mtime: Date.now(), ctime: Date.now(), size: 0 };
-  extension = "pptx";
+  extension: string;
   basename: string;
   name: string;
-  constructor(public path: string) { this.name = path.split("/").pop() ?? path; this.basename = this.name.replace(/\.pptx$/, ""); }
+  constructor(public path: string) { this.name = path.split("/").pop() ?? path; this.extension = this.name.split(".").pop() ?? ""; this.basename = this.name.replace(/\.[^.]+$/, ""); }
 }
 export class FileSystemAdapter { getFullPath(path: string) { return path; } }
 export class TestApp {

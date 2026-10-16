@@ -1,11 +1,10 @@
+import type { DocxSource, OfficeSourceFile } from "../reader/officeSource";
 import {
   App,
-  FileView,
+  type ItemView,
   Modal,
   Notice,
   Platform,
-  TFile,
-  WorkspaceLeaf,
   setIcon,
 } from "obsidian";
 
@@ -18,8 +17,6 @@ import {
   type ElectronNativeImage,
   type ElectronNativeImageModule,
 } from "../desktopRuntime";
-import { createNoteFromDocx } from "../commands/createNoteFromDocx";
-import { openExternalDocx } from "../commands/openExternal";
 import { renderDocx } from "./docxRenderer";
 import { DOCX_HEADING_LEVEL_ATTRIBUTE } from "./docxOutline";
 import type { WordReaderText } from "../i18n";
@@ -58,7 +55,6 @@ import {
   preserveZoomAnchor,
 } from "../reader/zoom";
 import { TextSearchIndex } from "../reader/textSearchIndex";
-import type { ReaderSession } from "../reader/session";
 import {
   getReaderRecoveryText,
   type ReaderRecoveryReason,
@@ -102,7 +98,10 @@ interface ScrollPosition {
   top: number;
 }
 
-export class DocxSession extends FileView implements ReaderSession {
+export class DocxSession {
+  private readonly contentEl: HTMLElement;
+  private source: DocxSource | null = null;
+  get file(): OfficeSourceFile | null { return this.source?.file ?? null; }
   readonly adapter: DocxAdapter = DOCX_ADAPTER;
   readonly capabilities = this.adapter.capabilities;
   private readonly plugin: WordReaderPlugin;
@@ -163,8 +162,11 @@ export class DocxSession extends FileView implements ReaderSession {
   private fileRevision: ReaderFileRevision | null = null;
   private maximumDomNodes = 0;
 
-  constructor(leaf: WorkspaceLeaf, plugin: WordReaderPlugin) {
-    super(leaf);
+  private readonly app: App;
+
+  constructor(host: ItemView, plugin: WordReaderPlugin) {
+    this.contentEl = host.contentEl;
+    this.app = host.app;
     nextSearchHighlightId += 1;
     this.plugin = plugin;
     this.shell = new OfficeReaderShell(this.contentEl, this.capabilities);
@@ -194,6 +196,7 @@ export class DocxSession extends FileView implements ReaderSession {
   }
 
   async onClose(): Promise<void> {
+    this.saveReadingState();
     this.renderLifecycle.cancel();
     this.cancelScrollFrame();
     this.cancelSearchWork();
@@ -205,11 +208,15 @@ export class DocxSession extends FileView implements ReaderSession {
     await this.sessionResources.drainTasks();
     this.sessionResources.clear();
     this.contentEl.empty();
+    this.source = null;
+    await this.plugin.flushData();
   }
 
-  async onLoadFile(file: TFile): Promise<void> {
-    this.restoreReadingState(file);
-    await this.loadDocx(file);
+  async onLoadSource(source: DocxSource): Promise<void> {
+    await this.onUnloadFile();
+    this.source = source;
+    this.restoreReadingState(source.file);
+    await this.loadDocx(source.file);
   }
 
   async onUnloadFile(): Promise<void> {
@@ -223,20 +230,22 @@ export class DocxSession extends FileView implements ReaderSession {
     this.fileRevision = null;
     this.updateSearchState();
     this.setStatus("");
+    this.source = null;
     await this.plugin.flushData();
   }
 
   async reload(): Promise<void> {
-    if (!this.file) {
-      return;
+    const source = this.source;
+    if (!source) return;
+    try {
+      await source.refresh();
+      if (this.source !== source) return;
+      if (this.activeFilePath) this.captureScrollPosition();
+      else this.restoreReadingState(source.file);
+      await this.loadDocx(source.file, { force: true });
+    } catch {
+      if (this.source === source) this.invalidateForRecovery("missing-file");
     }
-
-    if (this.activeFilePath) {
-      this.captureScrollPosition();
-    } else {
-      this.restoreReadingState(this.file);
-    }
-    await this.loadDocx(this.file, { force: true });
   }
 
   handleFileChange(change: ReaderFileChange): void {
@@ -260,7 +269,7 @@ export class DocxSession extends FileView implements ReaderSession {
 
   async openExternal(): Promise<void> {
     if (this.file) {
-      await openExternalDocx(this.app, this.file, this.text);
+      await this.source?.openExternal();
     }
   }
 
@@ -272,7 +281,7 @@ export class DocxSession extends FileView implements ReaderSession {
       new Notice(this.text.notices.legacyDoc);
       return;
     }
-    await createNoteFromDocx(this.app, this.file, this.text);
+    await this.source?.createSummary(this.text);
   }
 
   async copyDiagnostics(): Promise<void> {
@@ -580,7 +589,7 @@ export class DocxSession extends FileView implements ReaderSession {
   }
 
   private async loadDocx(
-    file: TFile,
+    file: OfficeSourceFile,
     options: { force?: boolean } = {},
   ): Promise<void> {
     this.ensureLayout();
@@ -651,17 +660,19 @@ export class DocxSession extends FileView implements ReaderSession {
       }
 
       const readStartedAt = performance.now();
-      const buffer = await this.adapter.open(this.app, file);
+      const source = this.source;
+      if (!source || source.file !== file) return;
+      const buffer = await this.adapter.openBuffer(await source.read());
       if (!this.isLoadCurrent(token)) {
         return;
       }
 
-      this.buffer = buffer;
       this.sessionResources.track("caches", "docx-buffer", () => {
         if (this.buffer === buffer) {
           this.buffer = null;
         }
       });
+      this.buffer = buffer;
       const readDurationMs = performance.now() - readStartedAt;
       this.performanceTracker.recordTiming("packageLoadMs", readDurationMs);
       await this.renderCurrentBuffer(token, renderKey, {
@@ -1252,7 +1263,7 @@ export class DocxSession extends FileView implements ReaderSession {
     this.shell.renderStatus(this.statusEl, status);
   }
 
-  private showLegacyDocMessage(file: TFile): void {
+  private showLegacyDocMessage(file: OfficeSourceFile): void {
     if (!this.documentEl) {
       return;
     }
@@ -1277,13 +1288,13 @@ export class DocxSession extends FileView implements ReaderSession {
     });
     this.createIconButton(actionsEl, "external-link", this.text.toolbar.openExternally, () => {
       this.sessionResources.runTask(() =>
-        openExternalDocx(this.app, file, this.text)
+        this.source?.openExternal()
       );
     });
     this.setStatus(this.text.status.legacyDoc(file.name));
   }
 
-  private showError(error: unknown, file: TFile): void {
+  private showError(error: unknown, file: OfficeSourceFile): void {
     const message = error instanceof Error ? error.message : String(error);
     const errorInfo = classifyWordError(message, this.text, this.buffer);
     const diagnostics = createWordDiagnostics(errorInfo.kind, message, {
@@ -1322,7 +1333,7 @@ export class DocxSession extends FileView implements ReaderSession {
       this.text.toolbar.openExternally,
       () => {
         this.sessionResources.runTask(() =>
-          openExternalDocx(this.app, file, this.text)
+          this.source?.openExternal()
         );
       },
     );
@@ -1556,10 +1567,10 @@ export class DocxSession extends FileView implements ReaderSession {
     );
   }
 
-  private restoreReadingState(file: TFile): void {
+  private restoreReadingState(file: OfficeSourceFile): void {
     this.activeFilePath = file.path;
     this.lastSavedReadingState = "";
-    const state = this.plugin.getReadingState(file);
+    const state = this.plugin.getReadingState({ path: file.path, mtime: file.stat.mtime, format: "docx" });
     const defaultZoom = this.plugin.settings.common.defaultZoomPercent / 100;
     this.zoom =
       normalizeZoom(state?.zoom ?? defaultZoom, {
@@ -1632,10 +1643,11 @@ export class DocxSession extends FileView implements ReaderSession {
       return;
     }
     this.lastSavedReadingState = serializedState;
-    this.plugin.updateReadingState(this.file ?? this.activeFilePath, state);
+    const file = this.file;
+    this.plugin.updateReadingState(file ? { path: file.path, mtime: file.stat.mtime, format: "docx" } : this.activeFilePath, state);
   }
 
-  private isLegacyDocFile(file: TFile): boolean {
+  private isLegacyDocFile(file: OfficeSourceFile): boolean {
     return file.extension.toLowerCase() === "doc";
   }
 
@@ -1695,7 +1707,7 @@ export class DocxSession extends FileView implements ReaderSession {
     return this.documentResources.retain(url);
   }
 
-  private getRenderKey(file: TFile): string {
+  private getRenderKey(file: OfficeSourceFile): string {
     return [
       file.path,
       file.stat.mtime,

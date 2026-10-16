@@ -1,13 +1,10 @@
+import type { XlsxSource, OfficeSourceFile } from "../reader/officeSource";
 import {
-  FileView,
+  type ItemView,
   Notice,
-  TFile,
-  WorkspaceLeaf,
   setIcon,
 } from "obsidian";
 
-import { createNoteFromXlsx } from "../commands/createNoteFromXlsx";
-import { openExternalFile } from "../commands/openExternal";
 import type WordReaderPlugin from "../main";
 import type { ReaderCapability } from "../reader/capabilities";
 import { ReaderLifecycle } from "../reader/lifecycle";
@@ -22,7 +19,6 @@ import {
   ReaderPerformanceTracker,
 } from "../reader/performanceDiagnostics";
 import type { ReaderViewState } from "../reader/readingState";
-import type { ReaderSession } from "../reader/session";
 import {
   getReaderRecoveryText,
   type ReaderRecoveryReason,
@@ -113,7 +109,10 @@ interface CellCoordinate {
   column: number;
 }
 
-export class XlsxSession extends FileView implements ReaderSession {
+export class XlsxSession {
+  private readonly contentEl: HTMLElement;
+  private source: XlsxSource | null = null;
+  get file(): OfficeSourceFile | null { return this.source?.file ?? null; }
   readonly adapter: XlsxAdapter = XLSX_ADAPTER;
   readonly capabilities = this.adapter.capabilities;
 
@@ -190,8 +189,8 @@ export class XlsxSession extends FileView implements ReaderSession {
     this.draggingSelection = false;
   };
 
-  constructor(leaf: WorkspaceLeaf, plugin: WordReaderPlugin) {
-    super(leaf);
+  constructor(host: ItemView, plugin: WordReaderPlugin) {
+    this.contentEl = host.contentEl;
     this.plugin = plugin;
     this.shell = new OfficeReaderShell(this.contentEl, this.capabilities);
     this.zoom = plugin.settings.common.defaultZoomPercent / 100;
@@ -229,6 +228,7 @@ export class XlsxSession extends FileView implements ReaderSession {
   }
 
   async onClose(): Promise<void> {
+    this.saveReadingState();
     this.sessionResources.clear();
     this.resizeObserver = null;
     this.cancelScheduledWork();
@@ -240,11 +240,15 @@ export class XlsxSession extends FileView implements ReaderSession {
     this.fileRevision = null;
     await this.sessionResources.drainTasks();
     this.sessionResources.clear();
+    this.source = null;
+    await this.plugin.flushData();
   }
 
-  async onLoadFile(file: TFile): Promise<void> {
-    this.restoreReadingState(file);
-    await this.loadWorkbook(file);
+  async onLoadSource(source: XlsxSource): Promise<void> {
+    await this.onUnloadFile();
+    this.source = source;
+    this.restoreReadingState(source.file);
+    await this.loadWorkbook(source.file);
   }
 
   async onUnloadFile(): Promise<void> {
@@ -258,15 +262,20 @@ export class XlsxSession extends FileView implements ReaderSession {
     this.releaseWorkbook();
     this.fileRevision = null;
     this.setStatus("");
+    this.source = null;
     await this.plugin.flushData();
   }
 
   async reload(): Promise<void> {
-    if (this.file) {
-      if (!this.activeFilePath) {
-        this.restoreReadingState(this.file);
-      }
-      await this.loadWorkbook(this.file);
+    const source = this.source;
+    if (!source) return;
+    try {
+      await source.refresh();
+      if (this.source !== source) return;
+      if (!this.activeFilePath) this.restoreReadingState(source.file);
+      await this.loadWorkbook(source.file);
+    } catch {
+      if (this.source === source) this.invalidateForRecovery("missing-file");
     }
   }
 
@@ -330,10 +339,7 @@ export class XlsxSession extends FileView implements ReaderSession {
       return;
     }
     try {
-      await openExternalFile(this.app, this.file, {
-        desktopOnly: this.text.notices.externalDesktopOnly,
-        localVaultOnly: this.text.notices.externalLocalVaultOnly,
-      });
+      await this.source?.openExternal();
     } catch (error) {
       new Notice(this.text.notices.externalFailed(getErrorMessage(error)));
     }
@@ -408,9 +414,7 @@ export class XlsxSession extends FileView implements ReaderSession {
       ) {
         return;
       }
-      await createNoteFromXlsx(
-        this.app,
-        file,
+      await this.source?.createSummary(
         summary,
         sheetIndex,
         rangeLabel,
@@ -725,7 +729,7 @@ export class XlsxSession extends FileView implements ReaderSession {
     this.readerStatus.refresh();
   }
 
-  private async loadWorkbook(file: TFile): Promise<void> {
+  private async loadWorkbook(file: OfficeSourceFile): Promise<void> {
     const previousToken = this.loadLifecycle.currentToken;
     this.performanceTracker.reset();
     this.workCoordinator.resetDiagnostics();
@@ -756,7 +760,9 @@ export class XlsxSession extends FileView implements ReaderSession {
     this.setStatus(this.text.status.reading(file.name), false, true);
     try {
       const packageLoadStartedAt = performance.now();
-      const workbook = await this.adapter.open(this.app, file);
+      const source = this.source;
+      if (!source || source.file !== file) return;
+      const workbook = await this.adapter.openBuffer(await source.read());
       this.performanceTracker.recordTiming(
         "packageLoadMs",
         performance.now() - packageLoadStartedAt,
@@ -2244,9 +2250,9 @@ export class XlsxSession extends FileView implements ReaderSession {
     }
   }
 
-  private restoreReadingState(file: TFile): void {
+  private restoreReadingState(file: OfficeSourceFile): void {
     this.activeFilePath = file.path;
-    const state = this.plugin.getReadingState(file);
+    const state = this.plugin.getReadingState({ path: file.path, mtime: file.stat.mtime, format: "xlsx" });
     const defaultZoom = this.plugin.settings.common.defaultZoomPercent / 100;
     this.zoom =
       normalizeZoom(state?.zoom ?? defaultZoom, {
@@ -2302,7 +2308,8 @@ export class XlsxSession extends FileView implements ReaderSession {
       collapsedOutlineIds: [],
       page: this.activeSheetIndex + 1,
     };
-    this.plugin.updateReadingState(this.file ?? this.activeFilePath, state);
+    const file = this.file;
+    this.plugin.updateReadingState(file ? { path: file.path, mtime: file.stat.mtime, format: "xlsx" } : this.activeFilePath, state);
   }
 
   private setReadyStatus(): void {

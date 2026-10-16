@@ -1,20 +1,10 @@
-import type { TFile } from "obsidian";
 import type { PptxReaderText } from "./pptxI18n";
 import type { PptxSlideMetadata } from "./pptxMetadata";
-import type { ReaderFileDescriptor } from "../reader/fileRevision";
+import type { BinaryOfficeSource, OfficeSourceFile } from "../reader/officeSource";
 
-export interface PptxSourceFile extends ReaderFileDescriptor {
-  name: string;
-  basename: string;
-  stat: { mtime: number; ctime: number; size: number };
-}
+export type PptxSourceFile = OfficeSourceFile;
 
 /** A document source, without pretending an external file is a vault TFile. */
-export interface PptxSource {
-  readonly file: PptxSourceFile;
-  readonly vaultFile?: TFile;
-  read(): Promise<ArrayBuffer>;
-  refresh(): Promise<void>;
-  openExternal(): Promise<void>;
+export interface PptxSource extends BinaryOfficeSource {
   createSummary(slides: readonly PptxSlideMetadata[], page: number, text: PptxReaderText): Promise<void>;
 }

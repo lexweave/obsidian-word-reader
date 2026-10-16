@@ -11,13 +11,14 @@ those files to its storage and sync workload.
 
 The original reader opens vault files. External `file://` links ordinarily launch
 a system application, interrupting the reading workflow. This fork adds
-[external PPTX preview in the clicked Obsidian pane](docs/external-pptx.md): it
+[external DOCX, PPTX, and XLSX preview in the clicked Obsidian pane](docs/external-office.md): it
 reads the existing file without importing it into the vault or creating symlinks.
 Existing vault DOCX, PPTX, and XLSX readers are retained.
 
-External PPTX preview has passed automated checks and a real macOS Obsidian test;
-the user also confirmed successful opening. External Word (`.docx`) and Excel
-(`.xlsx`) preview are possible next steps and **are not implemented yet**.
+External Word (`.docx`), PowerPoint (`.pptx`), and Excel (`.xlsx`) preview are
+implemented in this development branch. They share local file access and
+format-specific folder permissions while retaining the existing reading engines.
+See the validation section for automated and native desktop test coverage.
 
 See [fork rationale, implementation, validation, and future plans](FORK.md).
 The fork changes currently live on `feat/external-pptx` and are tracked in

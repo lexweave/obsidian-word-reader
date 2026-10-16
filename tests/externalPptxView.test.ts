@@ -20,7 +20,7 @@ async function until(check: () => boolean): Promise<void> {
   assert.ok(check(), "View did not reach the expected state");
 }
 
-void test("Live Preview spans intercept ordinary clicks and early editor mousedown only for PPTX", async () => {
+void test("Live Preview spans intercept ordinary clicks and early editor mousedown for all three Office formats", async () => {
   const app = new TestApp();
   const plugin = new WordReaderPlugin(app as unknown as App, {} as PluginManifest);
   await plugin.onload();
@@ -38,7 +38,7 @@ void test("Live Preview spans intercept ordinary clicks and early editor mousedo
     posAtDOM: () => position,
     state: { doc: { lineAt: () => ({ text, from: 0 }) } },
   }));
-  const open = mock.method(plugin, "openExternalPptx", async () => {});
+  const open = mock.method(plugin, "openExternalOffice", async () => {});
   let externalCalls = 0;
   target.addEventListener("mousedown", () => { externalCalls++; });
   target.addEventListener("click", () => { externalCalls++; });
@@ -54,12 +54,19 @@ void test("Live Preview spans intercept ordinary clicks and early editor mousedo
     position = text.indexOf("Canvas") + 1;
     dispatch("mousedown"); dispatch("click");
     assert.equal(externalCalls, 2, "Leave other links to Obsidian");
-    position = 3; text = "[Slides](<file:///tmp/slides.docx>)";
+    for (const format of ["docx", "xlsx"]) {
+      position = 3; text = `[Slides](<file:///tmp/slides.${format}>)`;
+      assert.equal(dispatch("mousedown"), false);
+      assert.equal(dispatch("click"), false);
+      assert.equal(open.mock.calls.at(-1)?.arguments[0], `file:///tmp/slides.${format}`);
+    }
+
+    position = 3; text = "[Slides](<file:///tmp/slides.pdf>)";
     dispatch("mousedown"); dispatch("click");
-    assert.equal(open.mock.callCount(), 1, "Do not intercept other file formats");
+    assert.equal(open.mock.callCount(), 3, "Do not intercept other file formats");
     text = "[Slides](<file:///tmp/slides.pptx>)"; source.className = "";
     dispatch("mousedown"); dispatch("click");
-    assert.equal(open.mock.callCount(), 1, "Plain source-mode clicks keep editing behavior");
+    assert.equal(open.mock.callCount(), 3, "Plain source-mode clicks keep editing behavior");
   } finally { editor.mock.restore(); open.mock.restore(); plugin.unload(); source.remove(); }
 });
 

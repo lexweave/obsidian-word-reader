@@ -39,7 +39,10 @@ implements OfficeReaderAdapter<ArrayBuffer, HTMLElement> {
   }
 
   async open(app: App, file: TFile): Promise<ArrayBuffer> {
-    const buffer = await app.vault.readBinary(file);
+    return this.openBuffer(await app.vault.readBinary(file));
+  }
+
+  async openBuffer(buffer: ArrayBuffer): Promise<ArrayBuffer> {
     await validateDocxPackage(buffer);
     return buffer;
   }
