@@ -40,6 +40,10 @@ implements OfficeReaderAdapter<PptxPackage, PptxSlideMetadata> {
 
   async open(app: App, file: TFile): Promise<PptxPackage> {
     const buffer = await app.vault.readBinary(file);
+    return this.openBuffer(buffer);
+  }
+
+  async openBuffer(buffer: ArrayBuffer): Promise<PptxPackage> {
     return PptxPackage.load(buffer);
   }
 

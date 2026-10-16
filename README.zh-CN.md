@@ -1,5 +1,7 @@
 # Office Reader
 
+本 fork 增加了 [vault 外 PPTX 在当前面板阅读](docs/external-pptx.md)的开发版本，不复制课件、不建立符号链接。
+
 [English README](README.md) | [迭代路线](ROADMAP.md)
 
 Office Reader 是一个 Obsidian 桌面端插件，用于在 Obsidian 内直接打开
@@ -238,7 +240,7 @@ Office Reader 是一个 Obsidian 桌面端插件，用于在 Obsidian 内直接�
 - DOCX 每次渲染只建立一次可复用文本索引，并使用 CSS Highlight，不再改写
   文档 DOM；阅读状态按动画帧合并，未变化状态不会重复写入。
 - 适配宽度只切换 CSS 状态，不会重新渲染文档。
-- 生产构建强制执行 `dist/main.js` 不超过 500 KiB 的体积预算。
+- 生产构建强制执行 `dist/main.js` 不超过 512 KiB 的体积预算。
 - 阅读状态使用最多保留 100 个文件的 LRU 存储；每条记录只包含路径、修改时间、
   格式、位置、缩放和导航状态。源文件修改后会清除过期的位置与导航状态，同时
   保留用户的缩放与适配偏好。
@@ -379,7 +381,7 @@ git tag 2.5.0
 git push origin 2.5.0
 ```
 
-workflow 会校验 tag 是否与 `package.json`、`manifest.json` 和 `package-lock.json` 一致，检查 500 KiB bundle 预算，然后构建插件、生成 `release/obsidian-word-reader-2.5.0.zip`、提取对应版本的 `CHANGELOG.md` 内容，并把 `main.js`、`manifest.json`、`styles.css` 和 zip 一起上传到 GitHub Release。
+workflow 会校验 tag 是否与 `package.json`、`manifest.json` 和 `package-lock.json` 一致，检查 512 KiB bundle 预算，然后构建插件、生成 `release/obsidian-word-reader-2.5.0.zip`、提取对应版本的 `CHANGELOG.md` 内容，并把 `main.js`、`manifest.json`、`styles.css` 和 zip 一起上传到 GitHub Release。
 
 ## 开发
 

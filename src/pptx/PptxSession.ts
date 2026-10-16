@@ -1,14 +1,10 @@
 import {
-  FileView,
+  type ItemView,
   Notice,
-  TFile,
-  WorkspaceLeaf,
   setIcon,
 } from "obsidian";
 
 import type WordReaderPlugin from "../main";
-import { createNoteFromPptx } from "../commands/createNoteFromPptx";
-import { openExternalFile } from "../commands/openExternal";
 import {
   createPptxErrorDiagnosticReport,
   formatPptxDiagnosticReport,
@@ -54,7 +50,7 @@ import {
   type ReaderStatus,
 } from "../reader/status";
 import { normalizeZoom, preserveZoomAnchor } from "../reader/zoom";
-import type { ReaderSession } from "../reader/session";
+import type { PptxSource, PptxSourceFile } from "./pptxSource";
 import {
   getReaderRecoveryText,
   type ReaderRecoveryReason,
@@ -101,7 +97,11 @@ interface PptxNavigationEntry {
   mounted: boolean;
 }
 
-export class PptxSession extends FileView implements ReaderSession {
+export class PptxSession {
+  private readonly contentEl: HTMLElement;
+  private source: PptxSource | null = null;
+
+  get file(): PptxSourceFile | null { return this.source?.file ?? null; }
   readonly adapter: PptxAdapter = PPTX_ADAPTER;
   readonly capabilities = this.adapter.capabilities;
   private readonly plugin: WordReaderPlugin;
@@ -186,8 +186,8 @@ export class PptxSession extends FileView implements ReaderSession {
     this.applyScale();
   };
 
-  constructor(leaf: WorkspaceLeaf, plugin: WordReaderPlugin) {
-    super(leaf);
+  constructor(host: ItemView, plugin: WordReaderPlugin) {
+    this.contentEl = host.contentEl;
     this.plugin = plugin;
     this.shell = new OfficeReaderShell(this.contentEl, this.capabilities);
     this.zoom = plugin.settings.common.defaultZoomPercent / 100;
@@ -229,6 +229,7 @@ export class PptxSession extends FileView implements ReaderSession {
   }
 
   async onClose(): Promise<void> {
+    this.saveReadingState();
     this.sessionResources.clear();
     this.resizeObserver = null;
     this.loadLifecycle.cancel();
@@ -239,9 +240,14 @@ export class PptxSession extends FileView implements ReaderSession {
     this.fileRevision = null;
     await this.sessionResources.drainTasks();
     this.sessionResources.clear();
+    this.source = null;
+    await this.plugin.flushData();
   }
 
-  async onLoadFile(file: TFile): Promise<void> {
+  async onLoadSource(source: PptxSource): Promise<void> {
+    await this.onUnloadFile();
+    this.source = source;
+    const file = source.file;
     this.searchQuery = "";
     if (this.searchInputEl) {
       this.searchInputEl.value = "";
@@ -260,15 +266,20 @@ export class PptxSession extends FileView implements ReaderSession {
     this.clearCanvas();
     this.fileRevision = null;
     this.setStatus("");
+    this.source = null;
     await this.plugin.flushData();
   }
 
   async reload(): Promise<void> {
-    if (this.file) {
-      if (!this.activeFilePath) {
-        this.restoreReadingState(this.file);
-      }
-      await this.loadPresentation(this.file);
+    const source = this.source;
+    if (!source) return;
+    try {
+      await source.refresh();
+      if (source !== this.source) return;
+      if (!this.activeFilePath) this.restoreReadingState(source.file);
+      await this.loadPresentation(source.file);
+    } catch {
+      if (source === this.source) this.invalidateForRecovery("missing-file");
     }
   }
 
@@ -277,10 +288,7 @@ export class PptxSession extends FileView implements ReaderSession {
       return;
     }
     try {
-      await openExternalFile(this.app, this.file, {
-        desktopOnly: this.text.notices.externalDesktopOnly,
-        localVaultOnly: this.text.notices.externalLocalVaultOnly,
-      });
+      await this.source?.openExternal();
     } catch (error) {
       new Notice(this.text.notices.externalFailed(getErrorMessage(error)));
     }
@@ -406,13 +414,7 @@ export class PptxSession extends FileView implements ReaderSession {
     if (metadata.length === 0 || this.presentation !== presentation) {
       return;
     }
-    await createNoteFromPptx(
-      this.app,
-      this.file,
-      metadata,
-      this.currentSlideIndex,
-      this.text,
-    );
+    await this.source?.createSummary(metadata, this.currentSlideIndex, this.text);
   }
 
   toggleNotes(): void {
@@ -782,7 +784,7 @@ export class PptxSession extends FileView implements ReaderSession {
     }
   }
 
-  private async loadPresentation(file: TFile): Promise<void> {
+  private async loadPresentation(file: PptxSourceFile): Promise<void> {
     const previousToken = this.loadLifecycle.currentToken;
     this.performanceTracker.reset();
     this.workCoordinator.resetDiagnostics();
@@ -808,7 +810,11 @@ export class PptxSession extends FileView implements ReaderSession {
 
     try {
       const packageLoadStartedAt = performance.now();
-      const presentation = await this.adapter.open(this.app, file);
+      const source = this.source;
+      if (!source) return;
+      const buffer = await source.read();
+      if (!this.isLoadCurrent(token)) return;
+      const presentation = await this.adapter.openBuffer(buffer);
       this.performanceTracker.recordTiming(
         "packageLoadMs",
         performance.now() - packageLoadStartedAt,
@@ -1876,9 +1882,9 @@ export class PptxSession extends FileView implements ReaderSession {
     this.shell.renderStatus(this.statusEl, status);
   }
 
-  private restoreReadingState(file: TFile): void {
+  private restoreReadingState(file: PptxSourceFile): void {
     this.activeFilePath = file.path;
-    const state = this.plugin.getReadingState(file);
+    const state = this.plugin.getReadingState({ path: file.path, mtime: file.stat.mtime, format: "pptx" });
     const defaultZoom = this.plugin.settings.common.defaultZoomPercent / 100;
     this.zoom =
       normalizeZoom(state?.zoom ?? defaultZoom, {
@@ -1923,7 +1929,8 @@ export class PptxSession extends FileView implements ReaderSession {
       page: this.currentSlideIndex + 1,
       notesVisible: this.notesVisible,
     };
-    this.plugin.updateReadingState(this.file ?? this.activeFilePath, state);
+    const file = this.file;
+    if (file) this.plugin.updateReadingState({ path: file.path, mtime: file.stat.mtime, format: "pptx" }, state);
   }
 
   private clearCanvas(): void {

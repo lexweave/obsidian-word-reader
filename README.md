@@ -1,5 +1,7 @@
 # Office Reader
 
+This fork adds a development preview for [external PPTX links in the current pane](docs/external-pptx.md), without copying files or creating symlinks.
+
 [中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md)
 
 Office Reader is a desktop-only Obsidian plugin for opening `.docx`, `.pptx`,
@@ -285,7 +287,7 @@ Available settings:
   without rewriting the document DOM. Reading-state writes are coalesced and
   unchanged states are skipped.
 - Fit-width mode is a CSS state change and does not rerender the document.
-- Production builds enforce a compressed `dist/main.js` budget of 500 KiB.
+- Production builds enforce a compressed `dist/main.js` budget of 512 KiB.
 - Reading state uses a bounded 100-file LRU store. Persisted entries contain
   only path, modification time, format, position, zoom, and navigation state.
   When a source file changes, stale position/navigation data is cleared while
@@ -430,7 +432,7 @@ git tag 2.5.0
 git push origin 2.5.0
 ```
 
-The workflow validates that the tag matches `package.json`, `manifest.json`, and `package-lock.json`, checks the 500 KiB bundle budget, builds the plugin, creates `release/obsidian-word-reader-2.5.0.zip`, extracts the matching `CHANGELOG.md` section, and uploads `main.js`, `manifest.json`, `styles.css`, and the zip to the GitHub Release.
+The workflow validates that the tag matches `package.json`, `manifest.json`, and `package-lock.json`, checks the 512 KiB bundle budget, builds the plugin, creates `release/obsidian-word-reader-2.5.0.zip`, extracts the matching `CHANGELOG.md` section, and uploads `main.js`, `manifest.json`, `styles.css`, and the zip to the GitHub Release.
 
 ## Development
 

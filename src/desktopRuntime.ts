@@ -38,22 +38,28 @@ interface ElectronModule {
   shell: ElectronShell;
 }
 
-interface FileSystemPromises {
-  writeFile(path: string, data: Uint8Array): Promise<void>;
-}
 
 export function getElectronModule(): ElectronModule {
   assertDesktop();
   return module.require("electron") as ElectronModule;
 }
 
-export function getFileSystemPromises(): FileSystemPromises {
+export function getFileSystemPromises(): typeof import("node:fs/promises") {
   assertDesktop();
-  return module.require("node:fs/promises") as FileSystemPromises;
+  return module.require("node:fs/promises") as typeof import("node:fs/promises");
 }
 
 function assertDesktop(): void {
   if (!Platform.isDesktopApp) {
     throw new Error("This operation is only available on desktop");
   }
+}
+
+export function getPathModule(): typeof import("node:path") {
+  assertDesktop();
+  return module.require("node:path") as typeof import("node:path");
+}
+export function getUrlModule(): typeof import("node:url") {
+  assertDesktop();
+  return module.require("node:url") as typeof import("node:url");
 }
