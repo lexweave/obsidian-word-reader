@@ -1,5 +1,30 @@
 # Office Reader
 
+## About this fork
+
+This is the LexWeave development fork of
+[qianwei4712/obsidian-word-reader](https://github.com/qianwei4712/obsidian-word-reader).
+It extends Office Reader for study workflows where Markdown notes live in an
+Obsidian vault synced through iCloud, while large course documents stay in a
+separate local folder. Keeping documents outside the synced vault avoids adding
+those files to its storage and sync workload.
+
+The original reader opens vault files. External `file://` links ordinarily launch
+a system application, interrupting the reading workflow. This fork adds
+[external DOCX, PPTX, and XLSX preview in the clicked Obsidian pane](docs/external-office.md): it
+reads the existing file without importing it into the vault or creating symlinks.
+Existing vault DOCX, PPTX, and XLSX readers are retained.
+
+External Word (`.docx`), PowerPoint (`.pptx`), and Excel (`.xlsx`) preview are
+implemented in this development branch. They share local file access and
+format-specific folder permissions while retaining the existing reading engines.
+See the validation section for automated and native desktop test coverage.
+
+See [fork rationale, implementation, validation, and future plans](FORK.md).
+The fork changes currently live on `feat/external-pptx` and are tracked in
+[draft PR #1](https://github.com/lexweave/obsidian-word-reader/pull/1).
+This is a development build, not an upstream release.
+
 [中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md)
 
 Office Reader is a desktop-only Obsidian plugin for opening `.docx`, `.pptx`,
@@ -285,7 +310,7 @@ Available settings:
   without rewriting the document DOM. Reading-state writes are coalesced and
   unchanged states are skipped.
 - Fit-width mode is a CSS state change and does not rerender the document.
-- Production builds enforce a compressed `dist/main.js` budget of 500 KiB.
+- Production builds enforce a compressed `dist/main.js` budget of 512 KiB.
 - Reading state uses a bounded 100-file LRU store. Persisted entries contain
   only path, modification time, format, position, zoom, and navigation state.
   When a source file changes, stale position/navigation data is cleared while
@@ -430,7 +455,7 @@ git tag 2.5.0
 git push origin 2.5.0
 ```
 
-The workflow validates that the tag matches `package.json`, `manifest.json`, and `package-lock.json`, checks the 500 KiB bundle budget, builds the plugin, creates `release/obsidian-word-reader-2.5.0.zip`, extracts the matching `CHANGELOG.md` section, and uploads `main.js`, `manifest.json`, `styles.css`, and the zip to the GitHub Release.
+The workflow validates that the tag matches `package.json`, `manifest.json`, and `package-lock.json`, checks the 512 KiB bundle budget, builds the plugin, creates `release/obsidian-word-reader-2.5.0.zip`, extracts the matching `CHANGELOG.md` section, and uploads `main.js`, `manifest.json`, `styles.css`, and the zip to the GitHub Release.
 
 ## Development
 

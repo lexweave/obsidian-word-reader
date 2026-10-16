@@ -18,7 +18,8 @@ function findTestFiles(directory) {
   });
 }
 
-const testFiles = findTestFiles(testsDir).sort();
+const requested = process.argv.slice(2);
+const testFiles = findTestFiles(testsDir).sort().filter((file) => !requested.length || requested.some((name) => file.includes(name)));
 if (testFiles.length === 0) {
   console.error("No test files found.");
   process.exit(1);
@@ -32,6 +33,7 @@ try {
     outdir: outputDir,
     outbase: testsDir,
     bundle: true,
+    alias: { obsidian: path.join(testsDir, "helpers", "obsidianMock.ts") },
     packages: "external",
     platform: "node",
     format: "cjs",

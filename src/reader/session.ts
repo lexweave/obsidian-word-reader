@@ -9,6 +9,8 @@ export interface ReaderSession {
   readonly adapter: OfficeReaderAdapter<unknown, unknown>;
   readonly capabilities: ReaderCapabilities;
   readonly file: TFile | null;
+  readonly managesOwnSource?: boolean;
+  hasSource?: () => boolean;
 
   onOpen: () => Promise<void>;
   onClose: () => Promise<void>;

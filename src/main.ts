@@ -1,4 +1,8 @@
-import { Plugin, TFile } from "obsidian";
+import { Plugin, TFile, Platform, Notice, type WorkspaceLeaf } from "obsidian";
+import { ExternalPptxView, ExternalDocxView, ExternalXlsxView, EXTERNAL_DOCX_VIEW_TYPE, EXTERNAL_XLSX_VIEW_TYPE, EXTERNAL_PPTX_VIEW_TYPE, externalOfficeViewType } from "./ExternalOfficeView";
+import { ExternalOfficeAccess } from "./external/access";
+import { parseExternalOfficeLink, externalOfficeAtPosition, externalOfficeFormat } from "./external/links";
+import { EditorView } from "@codemirror/view";
 
 import {
   PptxView,
@@ -54,6 +58,9 @@ export default class WordReaderPlugin extends Plugin {
   settings: OfficeReaderSettings = normalizeOfficeReaderSettings(
     DEFAULT_OFFICE_READER_SETTINGS,
   );
+  externalOfficeAccess = new ExternalOfficeAccess(this.app);
+  private openingExternal = false;
+  private readonly externalDocuments = new Set<Document>();
   private readingStates = new ReadingStateStore();
   private readonly fileRevisions = new ReaderFileRevisionTracker();
   private dataSaveTimer: number | null = null;
@@ -61,6 +68,20 @@ export default class WordReaderPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    if (Platform.isDesktopApp) {
+      this.registerView(EXTERNAL_PPTX_VIEW_TYPE, (leaf) => new ExternalPptxView(leaf, this));
+      this.registerView(EXTERNAL_DOCX_VIEW_TYPE, (leaf) => new ExternalDocxView(leaf, this));
+      this.registerView(EXTERNAL_XLSX_VIEW_TYPE, (leaf) => new ExternalXlsxView(leaf, this));
+      this.registerExternalOfficeLinks(activeDocument);
+      this.app.workspace.iterateAllLeaves((leaf) => this.registerExternalOfficeLinks(leaf.view.containerEl.doc));
+      this.registerEvent(this.app.workspace.on("window-open", (_workspace, win) => {
+        this.registerExternalOfficeLinks(win.document);
+      }));
+      this.addCommand({ id: "reset-external-pptx-access", name: "Forget external office folder permissions", callback: () => {
+        this.externalOfficeAccess.clear();
+        new Notice("External office folder permissions cleared.");
+      } });
+    }
     this.addSettingTab(new WordReaderSettingTab(this.app, this));
     const text = this.text;
     const pptxText = getPptxReaderText(this.settings.common.language);
@@ -275,6 +296,7 @@ export default class WordReaderPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.externalDocuments.clear();
     if (this.dataSaveTimer !== null) {
       window.clearTimeout(this.dataSaveTimer);
       this.dataSaveTimer = null;
@@ -282,6 +304,73 @@ export default class WordReaderPlugin extends Plugin {
         console.error("Office Reader could not save plugin data", error);
       });
     }
+  }
+
+  private registerExternalOfficeLinks(doc: Document): void {
+    if (this.externalDocuments.has(doc)) return;
+    this.externalDocuments.add(doc);
+    // Obsidian Live Preview uses CodeMirror spans, not <a> elements. Capture
+    // mousedown as well: its editor handler can open URLs before click fires.
+    this.registerDomEvent(doc, "mousedown", (event: MouseEvent) => {
+      const target = event.targetNode;
+      if (event.button !== 0 || !target?.instanceOf(Element)) return;
+      if (!this.externalOfficeFromEditorEvent(event, target)) return;
+      if (!this.externalLinkLeaf(target)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+    }, true);
+    this.registerDomEvent(doc, "click", (event: MouseEvent) => {
+      const target = event.targetNode;
+      if (event.button !== 0 || !target?.instanceOf(Element)) return;
+      const anchor = target.closest("a[href]");
+      const href = anchor?.getAttribute("href");
+      const uri = href ? parseExternalOfficeLink(href) : this.externalOfficeFromEditorEvent(event, target);
+      if (!uri) return;
+      const sourceLeaf = this.externalLinkLeaf(anchor ?? target);
+      if (!sourceLeaf) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      void this.openExternalOffice(uri, sourceLeaf);
+    }, true);
+  }
+
+  private externalOfficeFromEditorEvent(event: MouseEvent, target: Element): string | null {
+    const editor = target.closest(".cm-editor");
+    if (!editor) return null;
+    const renderedLink = target.closest(".cm-link, .cm-url, .external-link");
+    const livePreview = !!target.closest(".is-live-preview");
+    if (!(event.ctrlKey || event.metaKey) && !(livePreview && renderedLink)) return null;
+    try {
+      const view = EditorView.findFromDOM(editor as HTMLElement);
+      if (!view) return null;
+      // DOM positions also work for hidden URL/icon widgets in Live Preview.
+      const position = renderedLink ? view.posAtDOM(target) : view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (position === null) return null;
+      const line = view.state.doc.lineAt(position);
+      return externalOfficeAtPosition(line.text, position - line.from);
+    } catch { return null; }
+  }
+
+  private externalLinkLeaf(element: Element): WorkspaceLeaf | null {
+    const pane = element.closest(".workspace-leaf");
+    let result: WorkspaceLeaf | null = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (pane?.contains(leaf.view.containerEl)) result = leaf;
+    });
+    return result;
+  }
+
+  async openExternalOffice(uri: string, leaf: WorkspaceLeaf): Promise<void> {
+    if (!Platform.isDesktopApp || !parseExternalOfficeLink(uri) || this.openingExternal) return;
+    this.openingExternal = true;
+    try {
+      const path = await this.externalOfficeAccess.require(uri, true);
+      if (!path) return;
+      const format = externalOfficeFormat(uri);
+      if (!format) return;
+      await leaf.setViewState({ type: externalOfficeViewType(format), state: { uri }, active: true });
+      await this.app.workspace.revealLeaf(leaf);
+    } catch {
+      new Notice("Could not open the external office document. Check the file and folder permission.");
+    } finally { this.openingExternal = false; }
   }
 
   get text(): WordReaderText {
@@ -293,6 +382,9 @@ export default class WordReaderPlugin extends Plugin {
       VIEW_TYPE_WORD_READER,
       VIEW_TYPE_PPTX_READER,
       VIEW_TYPE_XLSX_READER,
+      EXTERNAL_PPTX_VIEW_TYPE,
+      EXTERNAL_DOCX_VIEW_TYPE,
+      EXTERNAL_XLSX_VIEW_TYPE,
     ]) {
       for (const leaf of this.app.workspace.getLeavesOfType(viewType)) {
         if (isReaderSession(leaf.view)) {
@@ -384,7 +476,7 @@ export default class WordReaderPlugin extends Plugin {
       name,
       checkCallback: (checking) => {
         const session = this.getActiveReaderSession();
-        if (!session?.file || !isAvailable(session)) {
+        if (!session || (!session.file && !session.hasSource?.()) || !isAvailable(session)) {
           return false;
         }
         if (!checking) {
@@ -447,7 +539,7 @@ export default class WordReaderPlugin extends Plugin {
   }
 
   private recoverWorkspaceViews(): void {
-    const sessions = this.getReaderSessions();
+    const sessions = this.getReaderSessions().filter((session) => !session.managesOwnSource);
     const entries: ReaderWorkspaceEntry[] = sessions.map((session, index) => {
       const file = session.file;
       const currentFile = file
@@ -479,6 +571,9 @@ export default class WordReaderPlugin extends Plugin {
       VIEW_TYPE_WORD_READER,
       VIEW_TYPE_PPTX_READER,
       VIEW_TYPE_XLSX_READER,
+      EXTERNAL_PPTX_VIEW_TYPE,
+      EXTERNAL_DOCX_VIEW_TYPE,
+      EXTERNAL_XLSX_VIEW_TYPE,
     ]) {
       for (const leaf of this.app.workspace.getLeavesOfType(viewType)) {
         if (isReaderSession(leaf.view)) {
